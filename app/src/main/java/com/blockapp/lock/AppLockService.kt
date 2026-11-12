@@ -14,6 +14,8 @@ import android.view.accessibility.AccessibilityEvent
 import androidx.core.content.ContextCompat
 import com.blockapp.data.Prefs
 import com.blockapp.data.Schedule
+import com.blockapp.remote.RemoteSync
+import com.blockapp.vpn.FirewallVpnService
 
 /**
  * Servicio de accesibilidad: solo escucha qué app pasa a primer plano
@@ -32,6 +34,8 @@ class AppLockService : AccessibilityService() {
             UsageTracker.flush()
             val power = getSystemService(PowerManager::class.java)
             if (power.isInteractive) currentPkg?.let { checkAndLock(it) }
+            FirewallVpnService.ensureRunning(this@AppLockService)
+            RemoteSync.tick(this@AppLockService)
             handler.postDelayed(this, 15_000)
         }
     }
@@ -59,6 +63,7 @@ class AppLockService : AccessibilityService() {
         }
         ContextCompat.registerReceiver(this, screenReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         handler.postDelayed(tick, 15_000)
+        RemoteSync.syncSoon(this)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {

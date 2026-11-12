@@ -72,6 +72,9 @@ object UsageTracker {
 
     fun grantBonus(p: String) = Prefs.addBonus(p, BONUS_MINUTES)
 
+    /** Tiempo extra concedido a distancia desde el móvil del padre. */
+    fun grantBonusMinutes(p: String, minutes: Long) = Prefs.addBonus(p, minutes)
+
     fun format(seconds: Long): String {
         val totalMin = seconds / 60
         val h = totalMin / 60

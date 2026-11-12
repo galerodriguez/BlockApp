@@ -19,6 +19,8 @@ import com.blockapp.security.Biometric
 import com.blockapp.security.PinManager
 import com.blockapp.ui.BlockAppTheme
 import com.blockapp.ui.HomeScreen
+import com.blockapp.ui.ParentScreen
+import com.blockapp.ui.RoleScreen
 import com.blockapp.ui.PinScreen
 import com.blockapp.ui.SetupPinFlow
 import com.blockapp.vpn.FirewallVpnService
@@ -26,6 +28,7 @@ import com.blockapp.vpn.FirewallVpnService
 class MainActivity : AppCompatActivity() {
 
     private var hasPin by mutableStateOf(false)
+    private var role by mutableStateOf<String?>(null)
     private var authed by mutableStateOf(false)
     private var changingPin by mutableStateOf(false)
     private var authError by mutableStateOf<String?>(null)
@@ -52,11 +55,19 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         hasPin = PinManager.hasPin()
+        // Instalaciones anteriores (ya con PIN) eran siempre el móvil protegido
+        if (Prefs.role == null && hasPin) Prefs.role = Prefs.ROLE_CHILD
+        role = Prefs.role
         firewallOn = Prefs.firewallEnabled
 
         setContent {
             BlockAppTheme {
                 when {
+                    role == null -> RoleScreen(onPick = {
+                        Prefs.role = it
+                        role = it
+                    })
+
                     !hasPin -> SetupPinFlow(onDone = {
                         PinManager.setPin(it)
                         hasPin = true
@@ -65,7 +76,7 @@ class MainActivity : AppCompatActivity() {
 
                     !authed -> PinScreen(
                         title = "BlockApp",
-                        subtitle = "Introduce tu PIN",
+                        subtitle = if (role == Prefs.ROLE_PARENT) "Introduce el PIN de este móvil" else "Introduce el PIN parental",
                         error = authError,
                         onBiometric = if (Biometric.available(this@MainActivity)) ::promptBiometric else null,
                         onSubmit = ::checkPin
@@ -78,6 +89,14 @@ class MainActivity : AppCompatActivity() {
                             Toast.makeText(this@MainActivity, "PIN actualizado", Toast.LENGTH_SHORT).show()
                         },
                         onCancel = { changingPin = false }
+                    )
+
+                    role == Prefs.ROLE_PARENT -> ParentScreen(
+                        onChangePin = { changingPin = true },
+                        onSwitchRole = {
+                            Prefs.role = Prefs.ROLE_CHILD
+                            role = Prefs.ROLE_CHILD
+                        }
                     )
 
                     else -> HomeScreen(

@@ -59,6 +59,9 @@ import androidx.core.graphics.drawable.toBitmap
 import com.blockapp.data.Prefs
 import com.blockapp.data.Schedule
 import com.blockapp.lock.UsageTracker
+import com.blockapp.data.Apps
+import com.blockapp.remote.RemoteSync
+import androidx.compose.ui.text.font.FontFamily
 import kotlinx.coroutines.delay
 import com.blockapp.security.Biometric
 import kotlinx.coroutines.Dispatchers
@@ -111,6 +114,9 @@ fun HomeScreen(
     var limits by remember { mutableStateOf(Prefs.limits) }
     var usage by remember { mutableStateOf(UsageTracker.snapshot()) }
     var limitFor by remember { mutableStateOf<AppEntry?>(null) }
+    var remoteCode by remember { mutableStateOf(RemoteSync.code()) }
+    var confirmNewCode by remember { mutableStateOf(false) }
+    val clones = remember { Apps.clonedPackages(context) }
 
     // Refresca el uso de hoy cada 30 s mientras la pantalla está abierta
     LaunchedEffect(Unit) {
@@ -285,6 +291,72 @@ fun HomeScreen(
                 }
             }
 
+            // Control desde el móvil del padre
+            item {
+                SectionCard {
+                    Text("Control desde el móvil del padre", style = MaterialTheme.typography.titleMedium)
+                    val code = remoteCode
+                    if (code == null) {
+                        Text(
+                            "Permite cambiar bloqueos, horarios y límites desde otro móvil. " +
+                                "Los datos viajan cifrados.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Button(onClick = {
+                            remoteCode = RemoteSync.pair()
+                            RemoteSync.syncSoon(context)
+                        }) { Text("Vincular con el móvil del padre") }
+                    } else {
+                        Text(
+                            "En el móvil del padre: instala BlockApp, elige «Controlar el móvil de un hijo» " +
+                                "y escribe este código:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            code,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (!a11yOn) {
+                            Text(
+                                "Necesita el «Bloqueo con PIN» (Accesibilidad) activado para recibir los cambios.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = { confirmNewCode = true }) { Text("Código nuevo") }
+                            TextButton(onClick = {
+                                RemoteSync.unpair()
+                                remoteCode = null
+                            }) { Text("Desvincular") }
+                        }
+                    }
+                }
+            }
+
+            // Copias de apps (Dual Messenger, apps duales…)
+            if (clones.isNotEmpty()) {
+                item {
+                    SectionCard {
+                        val names = clones.map { pkg -> apps?.firstOrNull { it.pkg == pkg }?.label ?: pkg }
+                        Text("Apps duplicadas detectadas", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Copias: ${names.joinToString(", ")}.\n" +
+                                "• PIN y límite diario se aplican también a la copia (el tiempo de las dos se suma).\n" +
+                                "• «Sin red» NO puede quitarle internet a la copia: Android no lo permite sin root. " +
+                                "Si hace falta, borra la copia (en Samsung: Ajustes › Funciones avanzadas › Dual Messenger) " +
+                                "y pon PIN a «Ajustes» para que no se pueda volver a crear.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
             // Ajustes
             item {
                 SectionCard {
@@ -328,7 +400,7 @@ fun HomeScreen(
                             showLog = false
                         }) { Text("Borrar registro") }
                     }
-                    OutlinedButton(onClick = onChangePin, modifier = Modifier.fillMaxWidth()) { Text("Cambiar PIN") }
+                    OutlinedButton(onClick = onChangePin, modifier = Modifier.fillMaxWidth()) { Text("Cambiar PIN parental") }
                 }
             }
 
@@ -359,6 +431,7 @@ fun HomeScreen(
                         isLocked = app.pkg in locked,
                         limitMin = limits[app.pkg],
                         usedSeconds = usage[app.pkg] ?: 0L,
+                        hasClone = app.pkg in clones,
                         onLimitClick = { limitFor = app },
                         onToggleNet = {
                             blocked = blocked.toggle(app.pkg)
@@ -375,12 +448,28 @@ fun HomeScreen(
         }
     }
 
+    if (confirmNewCode) {
+        AlertDialog(
+            onDismissRequest = { confirmNewCode = false },
+            title = { Text("¿Crear un código nuevo?") },
+            text = { Text("El móvil del padre dejará de controlar este móvil hasta que escriba el código nuevo.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    remoteCode = RemoteSync.pair()
+                    RemoteSync.syncSoon(context)
+                    confirmNewCode = false
+                }) { Text("Crear") }
+            },
+            dismissButton = { TextButton(onClick = { confirmNewCode = false }) { Text("Cancelar") } }
+        )
+    }
+
     limitFor?.let { app ->
         LimitDialog(
-            app = app,
+            appLabel = app.label,
             current = limits[app.pkg],
             onPick = { minutes ->
-                limits = if (minutes == null) limits - app.pkg else limits + (app.pkg to minutes)
+                limits = minutes?.let { m -> limits + (app.pkg to m) } ?: (limits - app.pkg)
                 Prefs.limits = limits
                 limitFor = null
             },
@@ -390,7 +479,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun LimitDialog(app: AppEntry, current: Int?, onPick: (Int?) -> Unit, onDismiss: () -> Unit) {
+fun LimitDialog(appLabel: String, current: Int?, onPick: (Int?) -> Unit, onDismiss: () -> Unit) {
     val options = listOf<Pair<Int?, String>>(
         null to "Sin límite",
         15 to "15 min",
@@ -401,7 +490,7 @@ private fun LimitDialog(app: AppEntry, current: Int?, onPick: (Int?) -> Unit, on
     )
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Límite diario · ${app.label}") },
+        title = { Text("Límite diario · $appLabel") },
         text = {
             Column {
                 options.forEach { (minutes, text) ->
@@ -420,7 +509,7 @@ private fun LimitDialog(app: AppEntry, current: Int?, onPick: (Int?) -> Unit, on
 }
 
 @Composable
-private fun SectionCard(content: @Composable ColumnScope.() -> Unit) {
+fun SectionCard(content: @Composable ColumnScope.() -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(
             Modifier.padding(16.dp),
@@ -437,6 +526,7 @@ private fun AppRow(
     isLocked: Boolean,
     limitMin: Int?,
     usedSeconds: Long,
+    hasClone: Boolean,
     onLimitClick: () -> Unit,
     onToggleNet: () -> Unit,
     onToggleLock: () -> Unit,
@@ -448,6 +538,13 @@ private fun AppRow(
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(app.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (hasClone) {
+                        Text(
+                            "También la copia (PIN y límite)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     if (limitMin != null) {
                         val over = usedSeconds >= limitMin * 60L
                         Text(

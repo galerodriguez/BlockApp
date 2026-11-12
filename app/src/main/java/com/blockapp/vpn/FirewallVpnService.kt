@@ -17,9 +17,11 @@ import java.nio.ByteBuffer
  * Sus paquetes se leen y se descartan, así que se quedan sin internet.
  * El resto de apps no pasan por la VPN y funcionan con normalidad.
  *
- * Fuera del horario (o sin apps elegidas) la VPN queda "en reposo": solo contiene
- * a BlockApp, que no usa internet, así nada se bloquea pero el servicio sigue vivo
- * para reactivarse cuando empiece el horario.
+ * Fuera del horario (o sin apps elegidas) no se crea la interfaz VPN: nada se bloquea.
+ * El servicio de accesibilidad (siempre activo) la vuelve a crear cuando hace falta.
+ *
+ * Nota: las copias de apps de otros perfiles (Dual Messenger, apps duales, perfil de
+ * trabajo) no pasan por esta VPN; Android no permite filtrarlas sin root.
  */
 class FirewallVpnService : VpnService() {
 
@@ -33,6 +35,11 @@ class FirewallVpnService : VpnService() {
             if (Schedule.isActive() != appliedActive) startVpn()
             handler.postDelayed(this, 30_000)
         }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        alive = true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -72,12 +79,17 @@ class FirewallVpnService : VpnService() {
             }
         }
         // ¡Importante! Una VPN sin apps permitidas capturaría TODO el tráfico del móvil.
-        // En reposo metemos solo a BlockApp, que no tiene tráfico.
-        if (added == 0) builder.addAllowedApplication(packageName)
+        // En reposo no se crea la VPN (BlockApp necesita internet para el control remoto).
+        if (added == 0) {
+            appliedActive = active
+            lastActive = active
+            return true
+        }
 
         val fd = builder.establish() ?: return false // null si falta el permiso VPN
         tun = fd
         appliedActive = active
+        lastActive = active
         drain = Thread({ drainPackets(fd) }, "vpn-drain").apply {
             isDaemon = true
             start()
@@ -122,6 +134,8 @@ class FirewallVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        alive = false
+        lastActive = null
         handler.removeCallbacks(scheduleTick)
         closeTun()
         super.onDestroy()
@@ -130,6 +144,20 @@ class FirewallVpnService : VpnService() {
     companion object {
         private const val ACTION_START = "com.blockapp.vpn.START"
         private const val ACTION_STOP = "com.blockapp.vpn.STOP"
+
+        /** Estado para que el servicio de accesibilidad sepa si hay que recargar. */
+        @Volatile var alive = false
+        @Volatile var lastActive: Boolean? = null
+
+        /** Arranca el firewall si debería estar activo y no lo está (o cambió el horario). */
+        fun ensureRunning(context: Context) {
+            if (!Prefs.firewallEnabled) return
+            if (alive && lastActive == Schedule.isActive()) return
+            try {
+                if (VpnService.prepare(context) == null) start(context)
+            } catch (_: Exception) {
+            }
+        }
 
         /** Arranca o recarga el firewall con la lista y el horario actuales. */
         fun start(context: Context) {

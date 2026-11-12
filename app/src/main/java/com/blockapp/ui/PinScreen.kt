@@ -142,8 +142,8 @@ fun SetupPinFlow(onDone: (String) -> Unit, onCancel: (() -> Unit)? = null) {
     if (onCancel != null) BackHandler { onCancel() }
 
     PinScreen(
-        title = if (first == null) "Crea tu PIN" else "Confirma tu PIN",
-        subtitle = "De 4 a 8 dígitos. Protege BlockApp y tus apps bloqueadas.",
+        title = if (first == null) "Crea el PIN parental" else "Confirma el PIN parental",
+        subtitle = "De 4 a 8 dígitos. Solo quien lo sepa podrá cambiar los ajustes o abrir las apps bloqueadas.",
         error = error,
         onSubmit = { pin ->
             when {

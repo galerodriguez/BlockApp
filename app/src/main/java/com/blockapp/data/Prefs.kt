@@ -26,6 +26,18 @@ object Prefs {
     private const val K_SCHED_START = "schedule_start"
     private const val K_SCHED_END = "schedule_end"
     private const val K_SCHED_DAYS = "schedule_days"
+    private const val K_DIRTY = "remote_dirty"
+    private const val K_ROLE = "role"
+    private const val K_R_KEY = "remote_key"
+    private const val K_R_SINCE = "remote_since"
+    private const val K_R_LAST_TS = "remote_last_ts"
+    private const val K_R_LAST_STATUS = "remote_last_status"
+    private const val K_P_KEY = "parent_key"
+    private const val K_P_NAME = "parent_child_name"
+    private const val K_P_STATUS = "parent_status"
+
+    const val ROLE_CHILD = "child"
+    const val ROLE_PARENT = "parent"
 
     private lateinit var sp: SharedPreferences
 
@@ -47,12 +59,12 @@ object Prefs {
     /** Apps sin acceso a internet. */
     var blockedNet: Set<String>
         get() = sp.getStringSet(K_NET, emptySet())?.toSet() ?: emptySet()
-        set(value) = sp.edit().putStringSet(K_NET, value).apply()
+        set(value) = sp.edit().putStringSet(K_NET, value).putBoolean(K_DIRTY, true).apply()
 
     /** Apps que piden PIN al abrirse. */
     var lockedApps: Set<String>
         get() = sp.getStringSet(K_LOCK, emptySet())?.toSet() ?: emptySet()
-        set(value) = sp.edit().putStringSet(K_LOCK, value).apply()
+        set(value) = sp.edit().putStringSet(K_LOCK, value).putBoolean(K_DIRTY, true).apply()
 
     val pinHash: String? get() = sp.getString(K_HASH, null)
     val pinSalt: String? get() = sp.getString(K_SALT, null)
@@ -72,27 +84,27 @@ object Prefs {
     /** Segundos que una app sigue desbloqueada tras salir de ella (0 = se bloquea al salir). */
     var graceSeconds: Int
         get() = sp.getInt(K_GRACE, 0)
-        set(value) = sp.edit().putInt(K_GRACE, value).apply()
+        set(value) = sp.edit().putInt(K_GRACE, value).putBoolean(K_DIRTY, true).apply()
 
     /** Horario: si está activo, los bloqueos solo se aplican dentro de él. */
     var scheduleEnabled: Boolean
         get() = sp.getBoolean(K_SCHED_ON, false)
-        set(value) = sp.edit().putBoolean(K_SCHED_ON, value).apply()
+        set(value) = sp.edit().putBoolean(K_SCHED_ON, value).putBoolean(K_DIRTY, true).apply()
 
     /** Minutos desde medianoche (ej. 22:00 = 1320). */
     var scheduleStart: Int
         get() = sp.getInt(K_SCHED_START, 8 * 60)
-        set(value) = sp.edit().putInt(K_SCHED_START, value).apply()
+        set(value) = sp.edit().putInt(K_SCHED_START, value).putBoolean(K_DIRTY, true).apply()
 
     var scheduleEnd: Int
         get() = sp.getInt(K_SCHED_END, 18 * 60)
-        set(value) = sp.edit().putInt(K_SCHED_END, value).apply()
+        set(value) = sp.edit().putInt(K_SCHED_END, value).putBoolean(K_DIRTY, true).apply()
 
     /** Días activos, 1 = lunes … 7 = domingo. */
     var scheduleDays: Set<Int>
         get() = (sp.getStringSet(K_SCHED_DAYS, null) ?: setOf("1", "2", "3", "4", "5"))
             .mapNotNull { it.toIntOrNull() }.toSet()
-        set(value) = sp.edit().putStringSet(K_SCHED_DAYS, value.map { it.toString() }.toSet()).apply()
+        set(value) = sp.edit().putStringSet(K_SCHED_DAYS, value.map { it.toString() }.toSet()).putBoolean(K_DIRTY, true).apply()
 
     /** Registro de intentos fallidos, el más reciente primero. */
     val intrusions: List<String>
@@ -101,7 +113,7 @@ object Prefs {
     fun addIntrusion(where: String) {
         val ts = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date())
         val list = (listOf("$ts · $where") + intrusions).take(50)
-        sp.edit().putString(K_LOG, list.joinToString("\n")).apply()
+        sp.edit().putString(K_LOG, list.joinToString("\n")).putBoolean(K_DIRTY, true).apply()
     }
 
     fun clearIntrusions() {
@@ -117,7 +129,7 @@ object Prefs {
             val minutes = parts.getOrNull(1)?.toIntOrNull()
             if (parts.size == 2 && minutes != null) parts[0] to minutes else null
         }.toMap()
-        set(value) = sp.edit().putStringSet(K_LIMITS, value.map { "${it.key}=${it.value}" }.toSet()).apply()
+        set(value) = sp.edit().putStringSet(K_LIMITS, value.map { "${it.key}=${it.value}" }.toSet()).putBoolean(K_DIRTY, true).apply()
 
     /** Segundos usados hoy por app. */
     fun usageToday(): Map<String, Long> = dailyMap(K_USAGE)
@@ -158,4 +170,50 @@ object Prefs {
         }
         editor.putString(key, map.entries.joinToString(";") { "${it.key}=${it.value}" }).apply()
     }
+
+    // ---------- Control parental remoto ----------
+
+    /** "child" = móvil protegido, "parent" = móvil que controla a otro, null = sin elegir. */
+    var role: String?
+        get() = sp.getString(K_ROLE, null)
+        set(value) = sp.edit().putString(K_ROLE, value).apply()
+
+    /** true si hay cambios que el móvil del padre todavía no ha recibido. */
+    var statusDirty: Boolean
+        get() = sp.getBoolean(K_DIRTY, true)
+        set(value) = sp.edit().putBoolean(K_DIRTY, value).apply()
+
+    /** Clave compartida con el móvil del padre (Base64), o null si no está vinculado. */
+    var remoteKey: String?
+        get() = sp.getString(K_R_KEY, null)
+        set(value) = sp.edit().putString(K_R_KEY, value).apply()
+
+    /** Último mensaje de ntfy leído (id o marca de tiempo). */
+    var remoteSince: String
+        get() = sp.getString(K_R_SINCE, null) ?: "all"
+        set(value) = sp.edit().putString(K_R_SINCE, value).apply()
+
+    /** Marca de tiempo de la última orden aplicada (evita repeticiones). */
+    var remoteLastTs: Long
+        get() = sp.getLong(K_R_LAST_TS, 0L)
+        set(value) = sp.edit().putLong(K_R_LAST_TS, value).apply()
+
+    /** Cuándo se envió el último estado al padre. */
+    var remoteLastStatus: Long
+        get() = sp.getLong(K_R_LAST_STATUS, 0L)
+        set(value) = sp.edit().putLong(K_R_LAST_STATUS, value).apply()
+
+    /** En el móvil del padre: clave del hijo vinculado (Base64). */
+    var parentKey: String?
+        get() = sp.getString(K_P_KEY, null)
+        set(value) = sp.edit().putString(K_P_KEY, value).apply()
+
+    var parentChildName: String
+        get() = sp.getString(K_P_NAME, null) ?: "Hijo"
+        set(value) = sp.edit().putString(K_P_NAME, value).apply()
+
+    /** Último estado recibido del hijo (JSON), para mostrarlo sin conexión. */
+    var parentStatus: String?
+        get() = sp.getString(K_P_STATUS, null)
+        set(value) = sp.edit().putString(K_P_STATUS, value).apply()
 }
