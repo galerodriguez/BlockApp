@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">BlockApp</string>
+    <string name="a11y_label">BlockApp – Bloqueo de apps</string>
+    <string name="a11y_description">Detecta cuándo se abre una app protegida para pedir el PIN. No lee ni guarda el contenido de la pantalla.</string>
+</resources>

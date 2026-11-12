@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.BlockApp" parent="Theme.AppCompat.DayNight.NoActionBar" />
+</resources>
