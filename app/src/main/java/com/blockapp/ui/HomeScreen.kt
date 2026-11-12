@@ -59,6 +59,7 @@ import androidx.core.graphics.drawable.toBitmap
 import com.blockapp.data.Prefs
 import com.blockapp.data.Schedule
 import com.blockapp.lock.UsageTracker
+import com.blockapp.update.UpdateCard
 import com.blockapp.data.Apps
 import com.blockapp.remote.RemoteSync
 import androidx.compose.ui.text.font.FontFamily
@@ -149,6 +150,8 @@ fun HomeScreen(
             item {
                 Text("BlockApp", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             }
+
+            item { UpdateCard() }
 
             // Estado del bloqueo con PIN
             item {

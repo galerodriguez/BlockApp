@@ -8,6 +8,9 @@ y protección contra desinstalación.
 GitHub Actions compila el APK en cada cambio que se sube a `main`. Última versión:
 https://github.com/galerodriguez/BlockApp/releases/latest/download/BlockApp.apk
 
+Después, la propia app avisa cuando hay versión nueva: tarjeta **Actualización disponible ›
+Actualizar ahora** (la primera vez pide permitir instalar apps desde BlockApp).
+
 Si Google Play Protect bloquea la instalación: Play Store › tu foto › Play Protect › ⚙ ›
 desactiva «Analizar apps con Play Protect», instala y vuelve a activarlo.
 

@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.blockapp.data.Schedule
 import com.blockapp.lock.UsageTracker
+import com.blockapp.update.UpdateCard
 import com.blockapp.remote.ConfigJson
 import com.blockapp.remote.ParentLink
 import com.blockapp.data.Prefs
@@ -259,6 +260,8 @@ private fun RemoteControlScreen(onUnlinked: () -> Unit, onChangePin: () -> Unit)
                     fontWeight = FontWeight.Bold
                 )
             }
+
+            item { UpdateCard() }
 
             // Estado de la conexión
             item {
