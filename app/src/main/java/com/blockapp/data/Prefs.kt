@@ -35,6 +35,8 @@ object Prefs {
     private const val K_P_KEY = "parent_key"
     private const val K_P_NAME = "parent_child_name"
     private const val K_P_STATUS = "parent_status"
+    private const val K_LIST_FILTER = "list_filter"
+    private const val K_LIST_SORT = "list_sort"
 
     const val ROLE_CHILD = "child"
     const val ROLE_PARENT = "parent"
@@ -216,4 +218,14 @@ object Prefs {
     var parentStatus: String?
         get() = sp.getString(K_P_STATUS, null)
         set(value) = sp.edit().putString(K_P_STATUS, value).apply()
+
+    // ---------- Preferencias de la lista de apps ----------
+
+    var listFilter: String?
+        get() = sp.getString(K_LIST_FILTER, null)
+        set(value) = sp.edit().putString(K_LIST_FILTER, value).apply()
+
+    var listSort: String?
+        get() = sp.getString(K_LIST_SORT, null)
+        set(value) = sp.edit().putString(K_LIST_SORT, value).apply()
 }

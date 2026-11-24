@@ -14,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.blockapp.data.Prefs
+import com.blockapp.data.Usage
 import com.blockapp.lock.AppLockService
 import com.blockapp.security.Biometric
 import com.blockapp.security.PinManager
@@ -109,7 +110,8 @@ class MainActivity : AppCompatActivity() {
                         onBlockedNetChanged = {
                             if (Prefs.firewallEnabled) FirewallVpnService.start(this@MainActivity)
                         },
-                        onChangePin = { changingPin = true }
+                        onChangePin = { changingPin = true },
+                        onOpenUsageAccess = ::openUsageAccess
                     )
                 }
             }
@@ -191,6 +193,12 @@ class MainActivity : AppCompatActivity() {
         Prefs.firewallEnabled = true
         firewallOn = true
         FirewallVpnService.start(this)
+    }
+
+    private fun openUsageAccess() {
+        keepSession = true
+        Usage.openSettings(this)
+        Toast.makeText(this, "Busca «BlockApp» y activa el permiso", Toast.LENGTH_LONG).show()
     }
 
     private fun openAccessibilitySettings() {

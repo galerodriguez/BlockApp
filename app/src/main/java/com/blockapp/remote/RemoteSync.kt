@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import com.blockapp.data.Apps
 import com.blockapp.data.Prefs
+import com.blockapp.data.Usage
 import com.blockapp.lock.UsageTracker
 import com.blockapp.vpn.FirewallVpnService
 import org.json.JSONArray
@@ -139,6 +140,13 @@ object RemoteSync {
         val usage = JSONObject()
         for ((pkg, sec) in UsageTracker.snapshot()) usage.put(pkg, sec)
         put("usage", usage)
+
+        // Uso de los últimos 7 días (solo si el móvil del hijo dio «Acceso al uso»)
+        Usage.lastDays(context)?.let { week ->
+            val w = JSONObject()
+            for ((pkg, sec) in week) w.put(pkg, sec)
+            put("usage7", w)
+        }
 
         val bonus = JSONObject()
         for ((pkg, min) in Prefs.bonusToday()) bonus.put(pkg, min)

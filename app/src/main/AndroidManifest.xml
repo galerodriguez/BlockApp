@@ -10,6 +10,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Instalar las actualizaciones descargadas desde GitHub -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Tiempo de uso de cada app (para ordenar la lista); el usuario lo concede en Ajustes -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
     <application

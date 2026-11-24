@@ -180,6 +180,8 @@ private fun RemoteControlScreen(onUnlinked: () -> Unit, onChangePin: () -> Unit)
     var sending by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var limitFor by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var filter by remember { mutableStateOf(AppFilter.of(Prefs.listFilter)) }
+    var sort by remember { mutableStateOf(AppSort.of(Prefs.listSort)) }
     var confirmUnlink by remember { mutableStateOf(false) }
     var refreshTick by remember { mutableIntStateOf(0) }
 
@@ -242,6 +244,7 @@ private fun RemoteControlScreen(onUnlinked: () -> Unit, onChangePin: () -> Unit)
         }
     }
     val usage = remember(s) { ConfigJson.longMap(s?.optJSONObject("usage")) }
+    val usage7 = remember(s) { s?.optJSONObject("usage7")?.let { ConfigJson.longMap(it) } }
     val bonus = remember(s) { ConfigJson.longMap(s?.optJSONObject("bonus")) }
     val clones = remember(s) { ConfigJson.strings(s?.optJSONArray("clones")) }
     val intrusions = remember(s) { ConfigJson.strings(s?.optJSONArray("intrusions")).toList() }
@@ -417,22 +420,51 @@ private fun RemoteControlScreen(onUnlinked: () -> Unit, onChangePin: () -> Unit)
 
             // Lista de apps
             if (apps.isNotEmpty()) {
+                val sortUsage = usage7 ?: usage
+                val usageLabel = if (usage7 != null) "7 días" else "Hoy"
                 item {
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        label = { Text("Buscar app") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                    AppListControls(
+                        query = query,
+                        onQuery = { query = it },
+                        filter = filter,
+                        onFilter = { filter = it; Prefs.listFilter = it.name },
+                        sort = sort,
+                        onSort = { sort = it; Prefs.listSort = it.name },
+                        counts = filterCounts(cfg.net, cfg.lock, cfg.limits),
+                        usageNote = if (usage7 == null) {
+                            "Para ordenar por el uso de la semana, en el móvil del hijo pulsa " +
+                                "«Permitir Acceso al uso» en BlockApp"
+                        } else null,
+                        onUsageNoteClick = null,
                     )
                 }
-                val filtered = if (query.isBlank()) apps
-                else apps.filter { it.second.contains(query.trim(), ignoreCase = true) }
+                val filtered = arrangeApps(
+                    items = apps,
+                    pkgOf = { it.first },
+                    labelOf = { it.second },
+                    query = query,
+                    filter = filter,
+                    sort = sort,
+                    net = cfg.net,
+                    lock = cfg.lock,
+                    limits = cfg.limits,
+                    usage = sortUsage,
+                )
+                if (filtered.isEmpty()) {
+                    item { Text("No hay apps con este filtro.", style = MaterialTheme.typography.bodyMedium) }
+                }
                 items(filtered, key = { it.first }) { (pkg, label) ->
                     val limitMin = cfg.limits[pkg]
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                             Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            sortUsage[pkg]?.let { sec ->
+                                Text(
+                                    "$usageLabel: ${UsageTracker.format(sec)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                             if (pkg in clones) {
                                 Text(
                                     "Tiene copia (PIN y límite incluidos)",

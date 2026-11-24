@@ -61,6 +61,11 @@ import com.blockapp.data.Schedule
 import com.blockapp.lock.UsageTracker
 import com.blockapp.update.UpdateCard
 import com.blockapp.data.Apps
+import com.blockapp.data.Usage
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.blockapp.remote.RemoteSync
 import androidx.compose.ui.text.font.FontFamily
 import kotlinx.coroutines.delay
@@ -101,6 +106,7 @@ fun HomeScreen(
     onAdminToggle: (Boolean) -> Unit,
     onBlockedNetChanged: () -> Unit,
     onChangePin: () -> Unit,
+    onOpenUsageAccess: () -> Unit,
 ) {
     val context = LocalContext.current
     var apps by remember { mutableStateOf<List<AppEntry>?>(null) }
@@ -118,6 +124,23 @@ fun HomeScreen(
     var remoteCode by remember { mutableStateOf(RemoteSync.code()) }
     var confirmNewCode by remember { mutableStateOf(false) }
     val clones = remember { Apps.clonedPackages(context) }
+    var filter by remember { mutableStateOf(AppFilter.of(Prefs.listFilter)) }
+    var sort by remember { mutableStateOf(AppSort.of(Prefs.listSort)) }
+
+    // Uso de los últimos 7 días (permiso «Acceso al uso»); se recarga al volver a la app
+    var weekly by remember { mutableStateOf<Map<String, Long>?>(null) }
+    var resumeTick by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) resumeTick++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(resumeTick) {
+        weekly = withContext(Dispatchers.IO) { Usage.lastDays(context) }
+    }
 
     // Refresca el uso de hoy cada 30 s mientras la pantalla está abierta
     LaunchedEffect(Unit) {
@@ -407,13 +430,19 @@ fun HomeScreen(
                 }
             }
 
+            val sortUsage = weekly ?: usage
+            val usageLabel = if (weekly != null) "${Usage.DAYS} días" else "Hoy"
             item {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    label = { Text("Buscar app") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                AppListControls(
+                    query = query,
+                    onQuery = { query = it },
+                    filter = filter,
+                    onFilter = { filter = it; Prefs.listFilter = it.name },
+                    sort = sort,
+                    onSort = { sort = it; Prefs.listSort = it.name },
+                    counts = filterCounts(blocked, locked, limits),
+                    usageNote = if (weekly == null) "Permitir «Acceso al uso» para ordenar por el uso de la semana" else null,
+                    onUsageNoteClick = if (weekly == null) onOpenUsageAccess else null,
                 )
             }
 
@@ -425,8 +454,27 @@ fun HomeScreen(
                     }
                 }
             } else {
-                val filtered = if (query.isBlank()) list
-                else list.filter { it.label.contains(query.trim(), ignoreCase = true) }
+                val filtered = arrangeApps(
+                    items = list,
+                    pkgOf = { it.pkg },
+                    labelOf = { it.label },
+                    query = query,
+                    filter = filter,
+                    sort = sort,
+                    net = blocked,
+                    lock = locked,
+                    limits = limits,
+                    usage = sortUsage,
+                )
+                if (filtered.isEmpty()) {
+                    item {
+                        Text(
+                            "No hay apps con este filtro.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
                 items(filtered, key = { it.pkg }) { app ->
                     AppRow(
                         app = app,
@@ -435,6 +483,7 @@ fun HomeScreen(
                         limitMin = limits[app.pkg],
                         usedSeconds = usage[app.pkg] ?: 0L,
                         hasClone = app.pkg in clones,
+                        usageText = sortUsage[app.pkg]?.let { "$usageLabel: ${UsageTracker.format(it)}" },
                         onLimitClick = { limitFor = app },
                         onToggleNet = {
                             blocked = blocked.toggle(app.pkg)
@@ -530,6 +579,7 @@ private fun AppRow(
     limitMin: Int?,
     usedSeconds: Long,
     hasClone: Boolean,
+    usageText: String?,
     onLimitClick: () -> Unit,
     onToggleNet: () -> Unit,
     onToggleLock: () -> Unit,
@@ -541,6 +591,13 @@ private fun AppRow(
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(app.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (usageText != null && limitMin == null) {
+                        Text(
+                            usageText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     if (hasClone) {
                         Text(
                             "También la copia (PIN y límite)",
