@@ -1,5 +1,6 @@
 package com.blockapp.remote
 
+import com.blockapp.data.AppSchedule
 import com.blockapp.data.Prefs
 import org.json.JSONArray
 import org.json.JSONObject
@@ -17,6 +18,10 @@ object ConfigJson {
         put("schedEnd", Prefs.scheduleEnd)
         put("schedDays", JSONArray(Prefs.scheduleDays.sorted()))
         put("grace", Prefs.graceSeconds)
+        val sch = JSONObject()
+        for ((pkg, schedule) in Prefs.appSchedules) sch.put(pkg, schedule.encode())
+        put("appSched", sch)
+        put("autoLockNew", Prefs.autoLockNew)
     }
 
     fun apply(o: JSONObject) {
@@ -28,6 +33,19 @@ object ConfigJson {
         if (o.has("schedEnd")) Prefs.scheduleEnd = o.optInt("schedEnd")
         if (o.has("schedDays")) Prefs.scheduleDays = ints(o.optJSONArray("schedDays"))
         if (o.has("grace")) Prefs.graceSeconds = o.optInt("grace")
+        o.optJSONObject("appSched")?.let { Prefs.appSchedules = schedules(it) }
+        if (o.has("autoLockNew")) Prefs.autoLockNew = o.optBoolean("autoLockNew")
+    }
+
+    fun schedules(o: JSONObject?): Map<String, AppSchedule> {
+        if (o == null) return emptyMap()
+        val m = HashMap<String, AppSchedule>()
+        val keys = o.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            AppSchedule.decode(o.optString(k))?.let { m[k] = it }
+        }
+        return m
     }
 
     fun strings(a: JSONArray?): Set<String> {

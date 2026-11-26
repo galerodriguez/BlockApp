@@ -44,6 +44,7 @@ fun PinScreen(
     error: String? = null,
     icon: ImageBitmap? = null,
     onBiometric: (() -> Unit)? = null,
+    extra: (@Composable () -> Unit)? = null,
     onSubmit: (String) -> Boolean,
 ) {
     var pin by remember { mutableStateOf("") }
@@ -130,6 +131,10 @@ fun PinScreen(
                 enabled = pin.length >= 4,
                 modifier = Modifier.fillMaxWidth(0.8f)
             ) { Text("Aceptar") }
+            if (extra != null) {
+                Spacer(Modifier.height(12.dp))
+                extra()
+            }
         }
     }
 }

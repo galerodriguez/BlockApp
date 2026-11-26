@@ -62,6 +62,8 @@ import com.blockapp.lock.UsageTracker
 import com.blockapp.update.UpdateCard
 import com.blockapp.data.Apps
 import com.blockapp.data.Usage
+import com.blockapp.data.AppSchedule
+import com.blockapp.data.Pause
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
@@ -128,6 +130,10 @@ fun HomeScreen(
     val clones = remember { Apps.clonedPackages(context) }
     var filter by remember { mutableStateOf(AppFilter.of(Prefs.listFilter)) }
     var sort by remember { mutableStateOf(AppSort.of(Prefs.listSort)) }
+    var scheds by remember { mutableStateOf(Prefs.appSchedules) }
+    var schedFor by remember { mutableStateOf<AppEntry?>(null) }
+    var pauseUntil by remember { mutableStateOf(Prefs.pauseUntil) }
+    var autoLockNew by remember { mutableStateOf(Prefs.autoLockNew) }
 
     // Uso de los últimos 7 días (permiso «Acceso al uso»); se recarga al volver a la app
     var weekly by remember { mutableStateOf<Map<String, Long>?>(null) }
@@ -141,6 +147,11 @@ fun HomeScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(resumeTick) {
+        pauseUntil = Prefs.pauseUntil
+        scheds = Prefs.appSchedules
+        locked = Prefs.lockedApps
+        blocked = Prefs.blockedNet
+        limits = Prefs.limits
         weekly = withContext(Dispatchers.IO) { Usage.lastDays(context) }
     }
 
@@ -172,9 +183,7 @@ fun HomeScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            item {
-                Text("BlockApp", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            }
+            item { BrandHeader("BlockApp", "Móvil protegido") }
 
             item { UpdateCard() }
 
@@ -214,6 +223,16 @@ fun HomeScreen(
                         Switch(checked = firewallOn, onCheckedChange = onFirewallToggle)
                     }
                 }
+            }
+
+            // Pausa inmediata
+            item {
+                PauseCard(
+                    pauseUntil = pauseUntil,
+                    onStart = { m -> Pause.start(m); pauseUntil = Prefs.pauseUntil },
+                    onStop = { Pause.stop(); pauseUntil = 0L },
+                    note = if (!a11yOn) "Necesita el «Bloqueo con PIN» activado." else null
+                )
             }
 
             // Uso de hoy de las apps con límite
@@ -431,6 +450,21 @@ fun HomeScreen(
                             showLog = false
                         }) { Text("Borrar registro") }
                     }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("PIN a las apps nuevas")
+                            Text(
+                                "Las apps que se instalen quedarán con PIN hasta que las revises.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(checked = autoLockNew, onCheckedChange = {
+                            autoLockNew = it
+                            Prefs.autoLockNew = it
+                        })
+                    }
+                    AppearancePicker()
                     OutlinedButton(onClick = onChangePin, modifier = Modifier.fillMaxWidth()) { Text("Cambiar PIN parental") }
                 }
             }
@@ -445,7 +479,7 @@ fun HomeScreen(
                     onFilter = { filter = it; Prefs.listFilter = it.name },
                     sort = sort,
                     onSort = { sort = it; Prefs.listSort = it.name },
-                    counts = filterCounts(blocked, locked, limits),
+                    counts = filterCounts(blocked, locked, limits, scheds.keys),
                     usageNote = if (weekly == null) "Permitir «Acceso al uso» para ordenar por el uso de la semana" else null,
                     onUsageNoteClick = if (weekly == null) onOpenUsageAccess else null,
                 )
@@ -469,6 +503,7 @@ fun HomeScreen(
                     net = blocked,
                     lock = locked,
                     limits = limits,
+                    scheds = scheds.keys,
                     usage = sortUsage,
                 )
                 if (filtered.isEmpty()) {
@@ -490,6 +525,8 @@ fun HomeScreen(
                         hasClone = app.pkg in clones,
                         usageText = sortUsage[app.pkg]?.let { "$usageLabel: ${UsageTracker.format(it)}" },
                         onLimitClick = { limitFor = app },
+                        schedule = scheds[app.pkg],
+                        onScheduleClick = { schedFor = app },
                         onToggleNet = {
                             blocked = blocked.toggle(app.pkg)
                             Prefs.blockedNet = blocked
@@ -526,6 +563,19 @@ fun HomeScreen(
                 }) { Text("Crear") }
             },
             dismissButton = { TextButton(onClick = { confirmNewCode = false }) { Text("Cancelar") } }
+        )
+    }
+
+    schedFor?.let { app ->
+        AppScheduleDialog(
+            appLabel = app.label,
+            current = scheds[app.pkg],
+            onSave = { sch ->
+                scheds = sch?.let { scheds + (app.pkg to it) } ?: (scheds - app.pkg)
+                Prefs.appSchedules = scheds
+                schedFor = null
+            },
+            onDismiss = { schedFor = null }
         )
     }
 
@@ -594,6 +644,8 @@ private fun AppRow(
     hasClone: Boolean,
     usageText: String?,
     onLimitClick: () -> Unit,
+    schedule: AppSchedule?,
+    onScheduleClick: () -> Unit,
     onToggleNet: () -> Unit,
     onToggleLock: () -> Unit,
 ) {
@@ -639,6 +691,16 @@ private fun AppRow(
                     selected = limitMin != null,
                     onClick = onLimitClick,
                     label = { Text(if (limitMin == null) "Límite" else "⏱ ${UsageTracker.format(limitMin * 60L)}") }
+                )
+                FilterChip(
+                    selected = schedule != null,
+                    onClick = onScheduleClick,
+                    label = {
+                        Text(
+                            if (schedule == null) "Horario"
+                            else "🕒 ${Schedule.format(schedule.start)}–${Schedule.format(schedule.end)}"
+                        )
+                    }
                 )
             }
         }

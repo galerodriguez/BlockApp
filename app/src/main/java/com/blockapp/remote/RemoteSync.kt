@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import com.blockapp.data.Apps
+import com.blockapp.data.Pause
 import com.blockapp.data.Prefs
 import com.blockapp.data.Usage
 import com.blockapp.lock.UsageTracker
@@ -77,6 +78,44 @@ object RemoteSync {
         tick(context)
     }
 
+    /** El hijo pide más tiempo para [pkg]; el padre recibe el aviso. */
+    fun requestMoreTime(context: Context, pkg: String, label: String) {
+        Prefs.timeRequests = Prefs.timeRequests + (pkg to "pending")
+        val limit = Prefs.limits[pkg] ?: 0
+        val used = UsageTracker.usedSeconds(pkg)
+        sendEvent(context) {
+            put("type", "time_request")
+            put("pkg", pkg)
+            put("label", label)
+            put("limit", limit)
+            put("used", used)
+        }
+    }
+
+    /** Avisa al padre de que se instaló una app nueva. */
+    fun notifyNewApp(context: Context, pkg: String, label: String, locked: Boolean) {
+        Prefs.statusDirty = true
+        sendEvent(context) {
+            put("type", "new_app")
+            put("pkg", pkg)
+            put("label", label)
+            put("locked", locked)
+        }
+    }
+
+    private fun sendEvent(context: Context, fill: JSONObject.() -> Unit) {
+        val key = key() ?: return
+        val o = JSONObject().put("ts", System.currentTimeMillis())
+        o.fill()
+        executor.execute {
+            try {
+                Ntfy.publish(RemoteCrypto.topic(key, "e"), RemoteCrypto.seal(key, o.toString()))
+            } catch (_: Exception) {
+            }
+        }
+        lastPoll = 0L // de paso, sincronizar pronto
+    }
+
     private fun runOnce(context: Context, key: ByteArray) {
         var changed = false
         var wantStatus = false
@@ -98,8 +137,18 @@ object RemoteSync {
                     val minutes = o.optLong("min", UsageTracker.BONUS_MINUTES)
                     if (pkg.isNotBlank() && minutes in 1..600) {
                         UsageTracker.grantBonusMinutes(pkg, minutes)
+                        Prefs.timeRequests = Prefs.timeRequests - pkg
                         changed = true
                     }
+                }
+                "time_denied" -> {
+                    val pkg = o.optString("pkg")
+                    if (pkg.isNotBlank()) Prefs.timeRequests = Prefs.timeRequests + (pkg to "denied")
+                }
+                "pause" -> {
+                    val minutes = o.optInt("min")
+                    if (minutes > 0) Pause.start(minutes.coerceAtMost(24 * 60)) else Pause.stop()
+                    changed = true
                 }
                 "status" -> wantStatus = true
             }
@@ -135,6 +184,7 @@ object RemoteSync {
         put("device", "${Build.MANUFACTURER} ${Build.MODEL}")
         put("cfg", ConfigJson.current())
         put("firewall", Prefs.firewallEnabled)
+        put("pauseUntil", Prefs.pauseUntil)
         put("a11y", true) // si este código corre, el servicio de accesibilidad está activo
 
         val usage = JSONObject()

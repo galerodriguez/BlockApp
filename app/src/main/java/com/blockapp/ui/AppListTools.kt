@@ -24,7 +24,8 @@ enum class AppFilter(val label: String) {
     CONFIGURED("Con ajustes"),
     NET("Sin red"),
     PIN("PIN"),
-    LIMIT("Límite");
+    LIMIT("Límite"),
+    SCHEDULE("Horario");
 
     companion object {
         fun of(name: String?): AppFilter = values().firstOrNull { it.name == name } ?: ALL
@@ -55,10 +56,11 @@ fun <T> arrangeApps(
     net: Set<String>,
     lock: Set<String>,
     limits: Map<String, Int>,
+    scheds: Set<String>,
     usage: Map<String, Long>,
 ): List<T> {
     val q = query.trim()
-    fun configured(p: String) = p in net || p in lock || p in limits
+    fun configured(p: String) = p in net || p in lock || p in limits || p in scheds
 
     val filtered = items.filter { item ->
         val p = pkgOf(item)
@@ -69,6 +71,7 @@ fun <T> arrangeApps(
             AppFilter.NET -> p in net
             AppFilter.PIN -> p in lock
             AppFilter.LIMIT -> p in limits
+            AppFilter.SCHEDULE -> p in scheds
         }
     }
 
@@ -142,9 +145,15 @@ fun AppListControls(
 }
 
 /** Cuántas apps hay en cada filtro (para mostrarlo en los botones). */
-fun filterCounts(net: Set<String>, lock: Set<String>, limits: Map<String, Int>): Map<AppFilter, Int> = mapOf(
-    AppFilter.CONFIGURED to (net + lock + limits.keys).size,
+fun filterCounts(
+    net: Set<String>,
+    lock: Set<String>,
+    limits: Map<String, Int>,
+    scheds: Set<String>,
+): Map<AppFilter, Int> = mapOf(
+    AppFilter.CONFIGURED to (net + lock + limits.keys + scheds).size,
     AppFilter.NET to net.size,
     AppFilter.PIN to lock.size,
     AppFilter.LIMIT to limits.size,
+    AppFilter.SCHEDULE to scheds.size,
 )

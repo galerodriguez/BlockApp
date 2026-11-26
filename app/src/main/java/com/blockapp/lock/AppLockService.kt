@@ -12,6 +12,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.view.accessibility.AccessibilityEvent
 import androidx.core.content.ContextCompat
+import com.blockapp.data.Pause
 import com.blockapp.data.Prefs
 import com.blockapp.data.Schedule
 import com.blockapp.remote.RemoteSync
@@ -62,6 +63,8 @@ class AppLockService : AccessibilityService() {
             addAction(Intent.ACTION_USER_PRESENT)
         }
         ContextCompat.registerReceiver(this, screenReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        val pkgFilter = IntentFilter(Intent.ACTION_PACKAGE_ADDED).apply { addDataScheme("package") }
+        ContextCompat.registerReceiver(this, packageReceiver, pkgFilter, ContextCompat.RECEIVER_NOT_EXPORTED)
         handler.postDelayed(tick, 15_000)
         RemoteSync.syncSoon(this)
     }
@@ -90,8 +93,47 @@ class AppLockService : AccessibilityService() {
             UsageTracker.isOverLimit(pkg) ->
                 launchLock(pkg, LockActivity.MODE_LIMIT)
 
+            Pause.isActive() && pkg !in pauseExempt() && !LockSession.isUnlocked(pkg) ->
+                launchLock(pkg, LockActivity.MODE_PAUSE)
+
+            Prefs.appSchedules[pkg]?.allowsNow() == false && !LockSession.isUnlocked(pkg) ->
+                launchLock(pkg, LockActivity.MODE_SCHEDULE)
+
             pkg in Prefs.lockedApps && Schedule.isActive() && !LockSession.isUnlocked(pkg) ->
                 launchLock(pkg, LockActivity.MODE_PIN)
+        }
+    }
+
+    private var exemptCache: Set<String> = emptySet()
+    private var exemptAt = 0L
+
+    /** Apps permitidas durante la pausa (se recalcula cada 5 min). */
+    private fun pauseExempt(): Set<String> {
+        val now = System.currentTimeMillis()
+        if (now - exemptAt > 5 * 60_000L || exemptCache.isEmpty()) {
+            exemptCache = Pause.exempt(this)
+            exemptAt = now
+        }
+        return exemptCache
+    }
+
+    /** Apps recién instaladas: PIN automático (si está activado) y aviso al padre. */
+    private val packageReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return
+            val pkg = intent.data?.schemeSpecificPart ?: return
+            if (pkg == packageName) return
+            val pm = packageManager
+            // Solo apps con icono en el menú (no componentes del sistema)
+            if (pm.getLaunchIntentForPackage(pkg) == null) return
+            val label = try {
+                pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+            } catch (_: Exception) {
+                pkg
+            }
+            val lock = Prefs.autoLockNew
+            if (lock) Prefs.lockedApps = Prefs.lockedApps + pkg
+            RemoteSync.notifyNewApp(this@AppLockService, pkg, label, lock)
         }
     }
 
@@ -117,6 +159,7 @@ class AppLockService : AccessibilityService() {
         handler.removeCallbacks(tick)
         UsageTracker.pause()
         try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
+        try { unregisterReceiver(packageReceiver) } catch (_: Exception) {}
         super.onDestroy()
     }
 }

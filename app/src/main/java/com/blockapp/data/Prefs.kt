@@ -37,6 +37,15 @@ object Prefs {
     private const val K_P_STATUS = "parent_status"
     private const val K_LIST_FILTER = "list_filter"
     private const val K_LIST_SORT = "list_sort"
+    private const val K_THEME_MODE = "theme_mode"
+    private const val K_THEME_COLOR = "theme_color"
+    private const val K_APP_SCHED = "app_schedules"
+    private const val K_PAUSE = "pause_until"
+    private const val K_AUTOLOCK_NEW = "autolock_new"
+    private const val K_TIME_REQ = "time_requests"
+    private const val K_P_EVENTS_SINCE = "parent_events_since"
+    private const val K_P_PENDING = "parent_pending"
+    private const val K_P_NEW_APPS = "parent_new_apps"
 
     const val ROLE_CHILD = "child"
     const val ROLE_PARENT = "parent"
@@ -169,6 +178,7 @@ object Prefs {
         if (sp.getString(K_DAY, null) != t) {
             editor.putString(K_DAY, t)
             editor.remove(if (key == K_USAGE) K_BONUS else K_USAGE)
+            editor.remove(K_TIME_REQ)
         }
         editor.putString(key, map.entries.joinToString(";") { "${it.key}=${it.value}" }).apply()
     }
@@ -228,4 +238,68 @@ object Prefs {
     var listSort: String?
         get() = sp.getString(K_LIST_SORT, null)
         set(value) = sp.edit().putString(K_LIST_SORT, value).apply()
+
+    // ---------- Apariencia ----------
+
+    var themeMode: String?
+        get() = sp.getString(K_THEME_MODE, null)
+        set(value) = sp.edit().putString(K_THEME_MODE, value).apply()
+
+    var themeColor: String?
+        get() = sp.getString(K_THEME_COLOR, null)
+        set(value) = sp.edit().putString(K_THEME_COLOR, value).apply()
+
+    // ---------- Horario por app, pausa, apps nuevas ----------
+
+    /** Horario permitido por app. */
+    var appSchedules: Map<String, AppSchedule>
+        get() = (sp.getStringSet(K_APP_SCHED, emptySet()) ?: emptySet()).mapNotNull {
+            val i = it.indexOf('=')
+            if (i <= 0) null else AppSchedule.decode(it.substring(i + 1))?.let { sch -> it.substring(0, i) to sch }
+        }.toMap()
+        set(value) = sp.edit()
+            .putStringSet(K_APP_SCHED, value.map { "${it.key}=${it.value.encode()}" }.toSet())
+            .putBoolean(K_DIRTY, true).apply()
+
+    /** Fin de la pausa inmediata (ms), 0 = sin pausa. */
+    var pauseUntil: Long
+        get() = sp.getLong(K_PAUSE, 0L)
+        set(value) = sp.edit().putLong(K_PAUSE, value).putBoolean(K_DIRTY, true).apply()
+
+    /** Poner PIN automáticamente a las apps que se instalen. */
+    var autoLockNew: Boolean
+        get() = sp.getBoolean(K_AUTOLOCK_NEW, false)
+        set(value) = sp.edit().putBoolean(K_AUTOLOCK_NEW, value).putBoolean(K_DIRTY, true).apply()
+
+    /** Solicitudes de más tiempo de hoy: paquete → "pending" | "denied". */
+    var timeRequests: Map<String, String>
+        get() {
+            if (sp.getString(K_DAY, null) != today()) return emptyMap()
+            return (sp.getStringSet(K_TIME_REQ, emptySet()) ?: emptySet()).mapNotNull {
+                val i = it.indexOf('=')
+                if (i <= 0) null else it.substring(0, i) to it.substring(i + 1)
+            }.toMap()
+        }
+        set(value) {
+            val e = sp.edit()
+            if (sp.getString(K_DAY, null) != today()) {
+                e.putString(K_DAY, today()).remove(K_USAGE).remove(K_BONUS)
+            }
+            e.putStringSet(K_TIME_REQ, value.map { "${it.key}=${it.value}" }.toSet()).apply()
+        }
+
+    // Móvil del padre
+    var parentEventsSince: String?
+        get() = sp.getString(K_P_EVENTS_SINCE, null)
+        set(value) = sp.edit().putString(K_P_EVENTS_SINCE, value).apply()
+
+    /** Solicitudes de tiempo sin responder (JSON array). */
+    var parentPending: String
+        get() = sp.getString(K_P_PENDING, null) ?: "[]"
+        set(value) = sp.edit().putString(K_P_PENDING, value).apply()
+
+    /** Últimas apps instaladas en el móvil del hijo (JSON array). */
+    var parentNewApps: String
+        get() = sp.getString(K_P_NEW_APPS, null) ?: "[]"
+        set(value) = sp.edit().putString(K_P_NEW_APPS, value).apply()
 }

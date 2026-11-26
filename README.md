@@ -48,6 +48,16 @@ gradlew.bat assembleDebug
 - **Límite de uso diario** por app (15 min a 3 h). Al agotarse, la app se bloquea
   hasta medianoche; con el PIN o la huella se conceden 15 min extra.
   Solo cuenta el tiempo con la app en pantalla y el móvil encendido.
+- **Horario por app**: cada app con su franja permitida (ej. juegos de 18:00 a 20:00);
+  fuera de ella pide el PIN parental.
+- **Pausa inmediata** (15 min a 8 h): bloquea todas las apps salvo teléfono y mensajes.
+  Se puede lanzar también desde el móvil del padre.
+- **Pedir más tiempo**: al agotarse el límite, el hijo lo pide y el padre lo aprueba
+  (+15/+30/+60) o lo rechaza desde su móvil. El aviso llega con notificación (cada ~15 min en
+  segundo plano, al instante con la app abierta).
+- **Apps nuevas**: aviso al padre cuando se instala una app; opción de ponerles PIN automáticamente.
+- **Apariencia**: modo automático/claro/oscuro y color (índigo, azul, verde, violeta, naranja,
+  rojo o el del fondo de pantalla).
 - **Anti-desinstalación** con Administrador de dispositivo.
 - 30 s de espera tras 5 PIN fallidos y registro de intentos.
 - PIN con hash PBKDF2 y ajustes cifrados.

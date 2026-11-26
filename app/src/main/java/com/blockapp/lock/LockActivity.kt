@@ -3,6 +3,18 @@ package com.blockapp.lock
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.style.TextAlign
+import com.blockapp.data.Pause
+import com.blockapp.remote.RemoteSync
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
@@ -32,6 +44,8 @@ class LockActivity : AppCompatActivity() {
     private var error by mutableStateOf<String?>(null)
     private var autoPrompted = false
     private var promptOpen = false
+    private var requestState by mutableStateOf<String?>(null)
+    private val handler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,17 +58,30 @@ class LockActivity : AppCompatActivity() {
 
         setContent {
             BlockAppTheme {
-                val isLimit = mode == MODE_LIMIT
                 val limitMin = Prefs.limits[targetPkg] ?: 0
-                PinScreen(
-                    title = if (isLimit) "Se acabó el tiempo de $label" else "$label está bloqueada",
-                    subtitle = if (isLimit) {
+                val requestButton: @Composable () -> Unit = { RequestTimeButton() }
+                val (title, subtitle) = when (mode) {
+                    MODE_LIMIT -> "Se acabó el tiempo de $label" to (
                         "Límite diario: ${UsageTracker.format(limitMin * 60L)}. " +
-                            "Vuelve mañana o introduce el PIN para ${UsageTracker.BONUS_MINUTES} min más."
-                    } else "Introduce tu PIN para continuar",
+                            "Vuelve mañana o introduce el PIN parental para ${UsageTracker.BONUS_MINUTES} min más."
+                        )
+                    MODE_PAUSE -> "Pausa activa" to (
+                        "Todas las apps están en pausa hasta las ${clock(Prefs.pauseUntil)}. " +
+                            "Con el PIN parental puedes abrir $label igualmente."
+                        )
+                    MODE_SCHEDULE -> "$label no está disponible ahora" to (
+                        "Horario permitido: ${Prefs.appSchedules[targetPkg]?.describe() ?: "-"}. " +
+                            "Introduce el PIN parental para abrirla."
+                        )
+                    else -> "$label está bloqueada" to "Introduce el PIN parental para continuar"
+                }
+                PinScreen(
+                    title = title,
+                    subtitle = subtitle,
                     error = error,
                     icon = icon,
                     onBiometric = if (Biometric.available(this@LockActivity)) ::promptBiometric else null,
+                    extra = if (mode == MODE_LIMIT && RemoteSync.isPaired()) requestButton else null,
                     onSubmit = ::tryPin
                 )
             }
@@ -72,8 +99,52 @@ class LockActivity : AppCompatActivity() {
         }
     }
 
+    /** Cierra la pantalla sola si el bloqueo ya no aplica (p. ej. el padre dio más tiempo). */
+    private val watcher = object : Runnable {
+        override fun run() {
+            val stillBlocked = when (mode) {
+                MODE_LIMIT -> UsageTracker.isOverLimit(targetPkg)
+                MODE_PAUSE -> Pause.isActive()
+                MODE_SCHEDULE -> Prefs.appSchedules[targetPkg]?.allowsNow() == false
+                else -> true
+            }
+            requestState = Prefs.timeRequests[targetPkg]
+            if (!stillBlocked) {
+                finish()
+            } else {
+                handler.postDelayed(this, 5_000)
+            }
+        }
+    }
+
+    @Composable
+    private fun RequestTimeButton() {
+        when (requestState) {
+            "pending" -> Text(
+                "Solicitud enviada. Espera la respuesta del padre…",
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center
+            )
+            "denied" -> Text(
+                "El padre rechazó la solicitud de más tiempo.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+                textAlign = TextAlign.Center
+            )
+            else -> OutlinedButton(onClick = {
+                RemoteSync.requestMoreTime(this, targetPkg, label)
+                requestState = "pending"
+            }) { Text("Pedir más tiempo al padre") }
+        }
+    }
+
+    private fun clock(ms: Long): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ms))
+
     override fun onResume() {
         super.onResume()
+        handler.removeCallbacks(watcher)
+        handler.postDelayed(watcher, 5_000)
+        requestState = Prefs.timeRequests[targetPkg]
         visibleFor = targetPkg
         if (!autoPrompted && Biometric.available(this)) {
             autoPrompted = true
@@ -83,6 +154,7 @@ class LockActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        handler.removeCallbacks(watcher)
         // Con el diálogo de huella abierto seguimos tapando la app
         if (!promptOpen && visibleFor == targetPkg) visibleFor = null
     }
@@ -117,7 +189,7 @@ class LockActivity : AppCompatActivity() {
     }
 
     private fun promptBiometric() {
-        val what = if (mode == MODE_LIMIT) "Dar ${UsageTracker.BONUS_MINUTES} min más a $label" else "Desbloquear $label"
+        val what = if (mode == MODE_LIMIT) "Dar ${UsageTracker.BONUS_MINUTES} min más a $label" else "Abrir $label"
         promptOpen = true
         Biometric.prompt(this, what, onClosed = { promptOpen = false }) { unlock() }
     }
@@ -142,6 +214,8 @@ class LockActivity : AppCompatActivity() {
         const val EXTRA_MODE = "mode"
         const val MODE_PIN = "pin"
         const val MODE_LIMIT = "limit"
+        const val MODE_PAUSE = "pause"
+        const val MODE_SCHEDULE = "schedule"
 
         /** App que la pantalla de bloqueo está tapando ahora mismo (para no relanzarla). */
         @Volatile

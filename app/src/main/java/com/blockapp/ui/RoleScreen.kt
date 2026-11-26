@@ -30,7 +30,7 @@ fun RoleScreen(onPick: (String) -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text("BlockApp", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            BrandHeader("BlockApp", "Control parental")
             Spacer(Modifier.height(8.dp))
             Text(
                 "¿Cómo vas a usar este móvil?",

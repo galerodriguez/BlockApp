@@ -4,6 +4,9 @@ import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Intent
 import android.net.VpnService
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
@@ -16,6 +19,7 @@ import androidx.compose.runtime.setValue
 import com.blockapp.data.Prefs
 import com.blockapp.data.Usage
 import com.blockapp.lock.AppLockService
+import com.blockapp.remote.ParentEventsWorker
 import com.blockapp.security.Biometric
 import com.blockapp.security.PinManager
 import com.blockapp.ui.BlockAppTheme
@@ -53,6 +57,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    /** En el móvil del padre: avisos en segundo plano + permiso de notificaciones. */
+    private fun setupParentMode() {
+        ParentEventsWorker.schedule(this)
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            keepSession = true
+            notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         hasPin = PinManager.hasPin()
@@ -60,6 +77,7 @@ class MainActivity : AppCompatActivity() {
         if (Prefs.role == null && hasPin) Prefs.role = Prefs.ROLE_CHILD
         role = Prefs.role
         firewallOn = Prefs.firewallEnabled
+        if (role == Prefs.ROLE_PARENT) setupParentMode()
 
         setContent {
             BlockAppTheme {
@@ -67,6 +85,7 @@ class MainActivity : AppCompatActivity() {
                     role == null -> RoleScreen(onPick = {
                         Prefs.role = it
                         role = it
+                        if (it == Prefs.ROLE_PARENT) setupParentMode()
                     })
 
                     !hasPin -> SetupPinFlow(onDone = {
@@ -97,6 +116,7 @@ class MainActivity : AppCompatActivity() {
                         onSwitchRole = {
                             Prefs.role = Prefs.ROLE_CHILD
                             role = Prefs.ROLE_CHILD
+                            ParentEventsWorker.cancel(this@MainActivity)
                         }
                     )
 

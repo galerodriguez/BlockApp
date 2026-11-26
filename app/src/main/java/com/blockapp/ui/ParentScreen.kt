@@ -46,6 +46,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.blockapp.data.Schedule
+import com.blockapp.data.AppSchedule
+import androidx.compose.material3.CardDefaults
 import com.blockapp.lock.UsageTracker
 import com.blockapp.update.UpdateCard
 import com.blockapp.remote.ConfigJson
@@ -68,6 +70,8 @@ private data class ChildConfig(
     val schedEnd: Int,
     val schedDays: Set<Int>,
     val grace: Int,
+    val appSched: Map<String, AppSchedule>,
+    val autoLockNew: Boolean,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("net", JSONArray(net.sorted()))
@@ -80,6 +84,10 @@ private data class ChildConfig(
         put("schedEnd", schedEnd)
         put("schedDays", JSONArray(schedDays.sorted()))
         put("grace", grace)
+        val sch = JSONObject()
+        for ((pkg, schedule) in appSched) sch.put(pkg, schedule.encode())
+        put("appSched", sch)
+        put("autoLockNew", autoLockNew)
     }
 
     companion object {
@@ -92,6 +100,8 @@ private data class ChildConfig(
             schedEnd = o?.optInt("schedEnd", 18 * 60) ?: 18 * 60,
             schedDays = o?.optJSONArray("schedDays")?.let { ConfigJson.ints(it) } ?: setOf(1, 2, 3, 4, 5),
             grace = o?.optInt("grace") ?: 0,
+            appSched = ConfigJson.schedules(o?.optJSONObject("appSched")),
+            autoLockNew = o?.optBoolean("autoLockNew") ?: false,
         )
     }
 }
@@ -184,6 +194,19 @@ private fun RemoteControlScreen(onUnlinked: () -> Unit, onChangePin: () -> Unit)
     var sort by remember { mutableStateOf(AppSort.of(Prefs.listSort)) }
     var confirmUnlink by remember { mutableStateOf(false) }
     var refreshTick by remember { mutableIntStateOf(0) }
+    var schedFor by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var pending by remember { mutableStateOf(ParentLink.pending()) }
+    var newApps by remember { mutableStateOf(ParentLink.newApps()) }
+
+    // Avisos del hijo (solicitudes de tiempo, apps nuevas) cada 15 s mientras esta pantalla está abierta
+    LaunchedEffect(Unit) {
+        while (true) {
+            withContext(Dispatchers.IO) { ParentLink.fetchEvents() }
+            pending = ParentLink.pending()
+            newApps = ParentLink.newApps()
+            delay(15_000)
+        }
+    }
 
     fun applyStatus(s: JSONObject?) {
         if (s == null) return
@@ -231,6 +254,41 @@ private fun RemoteControlScreen(onUnlinked: () -> Unit, onChangePin: () -> Unit)
         }
     }
 
+    fun answerRequest(pkg: String, label: String, minutes: Long?) {
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                if (minutes == null) ParentLink.sendTimeDenied(pkg) else ParentLink.sendBonus(pkg, minutes)
+            }
+            if (ok) {
+                ParentLink.removePending(pkg)
+                pending = ParentLink.pending()
+                Toast.makeText(
+                    context,
+                    if (minutes == null) "Solicitud rechazada" else "+$minutes min para $label",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                Toast.makeText(context, "No se pudo enviar. Revisa la conexión.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    fun sendPause(minutes: Int) {
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) { ParentLink.sendPause(minutes) }
+            Toast.makeText(
+                context,
+                when {
+                    !ok -> "No se pudo enviar. Revisa la conexión."
+                    minutes > 0 -> "Pausa enviada. Se aplicará en 1 o 2 minutos."
+                    else -> "Fin de pausa enviado."
+                },
+                Toast.LENGTH_LONG
+            ).show()
+            if (ok) refreshTick++
+        }
+    }
+
     fun pickTime(current: Int, onPicked: (Int) -> Unit) {
         TimePickerDialog(context, { _, h, m -> onPicked(h * 60 + m) }, current / 60, current % 60, true).show()
     }
@@ -256,15 +314,75 @@ private fun RemoteControlScreen(onUnlinked: () -> Unit, onChangePin: () -> Unit)
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            item {
-                Text(
-                    "Móvil de ${Prefs.parentChildName}",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+            item { BrandHeader("Móvil de ${Prefs.parentChildName}", "Control parental") }
 
             item { UpdateCard() }
+
+            // Solicitudes de más tiempo
+            if (pending.isNotEmpty()) {
+                item {
+                    Card(
+                        Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                    ) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Piden más tiempo", style = MaterialTheme.typography.titleMedium)
+                            pending.forEach { r ->
+                                val pkg = r.optString("pkg")
+                                val label = r.optString("label").ifBlank { labelOf(pkg) }
+                                Text(
+                                    "$label · usó ${UsageTracker.format(r.optLong("used"))} " +
+                                        "de ${UsageTracker.format(r.optLong("limit") * 60L)}",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Row(
+                                    Modifier.horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Button(onClick = { answerRequest(pkg, label, 15) }) { Text("+15") }
+                                    Button(onClick = { answerRequest(pkg, label, 30) }) { Text("+30") }
+                                    Button(onClick = { answerRequest(pkg, label, 60) }) { Text("+60") }
+                                    OutlinedButton(onClick = { answerRequest(pkg, label, null) }) { Text("Rechazar") }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Apps instaladas hace poco
+            if (newApps.isNotEmpty()) {
+                item {
+                    SectionCard {
+                        Text("Apps nuevas en su móvil", style = MaterialTheme.typography.titleMedium)
+                        newApps.forEach { a ->
+                            val pkg = a.optString("pkg")
+                            val label = a.optString("label").ifBlank { pkg }
+                            val time = DateUtils.getRelativeTimeSpanString(a.optLong("ts"))
+                            Text("$label · $time", style = MaterialTheme.typography.bodyMedium)
+                            Row(
+                                Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                FilterChip(
+                                    selected = pkg in cfg.lock,
+                                    onClick = { cfg = cfg.copy(lock = cfg.lock.toggle(pkg)); dirty = true },
+                                    label = { Text("PIN") }
+                                )
+                                FilterChip(
+                                    selected = pkg in cfg.net,
+                                    onClick = { cfg = cfg.copy(net = cfg.net.toggle(pkg)); dirty = true },
+                                    label = { Text("Sin red") }
+                                )
+                                TextButton(onClick = {
+                                    ParentLink.dismissNewApp(pkg)
+                                    newApps = ParentLink.newApps()
+                                }) { Text("Revisada") }
+                            }
+                        }
+                    }
+                }
+            }
 
             // Estado de la conexión
             item {
@@ -306,6 +424,18 @@ private fun RemoteControlScreen(onUnlinked: () -> Unit, onChangePin: () -> Unit)
                     Button(onClick = { send() }, enabled = !sending, modifier = Modifier.fillMaxWidth()) {
                         Text(if (sending) "Enviando…" else "Enviar cambios al móvil del hijo")
                     }
+                }
+            }
+
+            // Pausa inmediata
+            if (s != null) {
+                item {
+                    PauseCard(
+                        pauseUntil = s.optLong("pauseUntil"),
+                        onStart = { m -> sendPause(m) },
+                        onStop = { sendPause(0) },
+                        note = "Se aplica en 1 o 2 minutos en el móvil del hijo."
+                    )
                 }
             }
 
@@ -430,7 +560,7 @@ private fun RemoteControlScreen(onUnlinked: () -> Unit, onChangePin: () -> Unit)
                         onFilter = { filter = it; Prefs.listFilter = it.name },
                         sort = sort,
                         onSort = { sort = it; Prefs.listSort = it.name },
-                        counts = filterCounts(cfg.net, cfg.lock, cfg.limits),
+                        counts = filterCounts(cfg.net, cfg.lock, cfg.limits, cfg.appSched.keys),
                         usageNote = if (usage7 == null) {
                             "Para ordenar por el uso de la semana, en el móvil del hijo pulsa " +
                                 "«Permitir Acceso al uso» en BlockApp"
@@ -448,6 +578,7 @@ private fun RemoteControlScreen(onUnlinked: () -> Unit, onChangePin: () -> Unit)
                     net = cfg.net,
                     lock = cfg.lock,
                     limits = cfg.limits,
+                    scheds = cfg.appSched.keys,
                     usage = sortUsage,
                 )
                 if (filtered.isEmpty()) {
@@ -493,6 +624,17 @@ private fun RemoteControlScreen(onUnlinked: () -> Unit, onChangePin: () -> Unit)
                                         Text(if (limitMin == null) "Límite" else "⏱ ${UsageTracker.format(limitMin * 60L)}")
                                     }
                                 )
+                                val sch = cfg.appSched[pkg]
+                                FilterChip(
+                                    selected = sch != null,
+                                    onClick = { schedFor = pkg to label },
+                                    label = {
+                                        Text(
+                                            if (sch == null) "Horario"
+                                            else "🕒 ${Schedule.format(sch.start)}–${Schedule.format(sch.end)}"
+                                        )
+                                    }
+                                )
                             }
                         }
                     }
@@ -504,7 +646,27 @@ private fun RemoteControlScreen(onUnlinked: () -> Unit, onChangePin: () -> Unit)
             // Ajustes del mando
             item {
                 SectionCard {
+                    Text("Ajustes del móvil del hijo", style = MaterialTheme.typography.titleMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("PIN a las apps nuevas")
+                            Text(
+                                "Las apps que instale quedarán con PIN hasta que las revises.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(checked = cfg.autoLockNew, onCheckedChange = {
+                            cfg = cfg.copy(autoLockNew = it); dirty = true
+                        })
+                    }
+                }
+            }
+
+            item {
+                SectionCard {
                     Text("Este móvil", style = MaterialTheme.typography.titleMedium)
+                    AppearancePicker()
                     OutlinedButton(onClick = onChangePin, modifier = Modifier.fillMaxWidth()) {
                         Text("Cambiar el PIN de este móvil")
                     }
@@ -514,6 +676,19 @@ private fun RemoteControlScreen(onUnlinked: () -> Unit, onChangePin: () -> Unit)
 
             if (dirty) item { Box(Modifier.padding(bottom = 48.dp)) {} }
         }
+    }
+
+    schedFor?.let { (pkg, label) ->
+        AppScheduleDialog(
+            appLabel = label,
+            current = cfg.appSched[pkg],
+            onSave = { sch ->
+                cfg = cfg.copy(appSched = sch?.let { cfg.appSched + (pkg to it) } ?: (cfg.appSched - pkg))
+                dirty = true
+                schedFor = null
+            },
+            onDismiss = { schedFor = null }
+        )
     }
 
     limitFor?.let { (pkg, label) ->
