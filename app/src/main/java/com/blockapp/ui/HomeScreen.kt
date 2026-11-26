@@ -101,6 +101,7 @@ fun HomeScreen(
     a11yOn: Boolean,
     firewallOn: Boolean,
     onOpenA11y: () -> Unit,
+    onOpenAppInfo: () -> Unit,
     onFirewallToggle: (Boolean) -> Unit,
     adminOn: Boolean,
     onAdminToggle: (Boolean) -> Unit,
@@ -123,6 +124,7 @@ fun HomeScreen(
     var limitFor by remember { mutableStateOf<AppEntry?>(null) }
     var remoteCode by remember { mutableStateOf(RemoteSync.code()) }
     var confirmNewCode by remember { mutableStateOf(false) }
+    var showA11yGuide by remember { mutableStateOf(false) }
     val clones = remember { Apps.clonedPackages(context) }
     var filter by remember { mutableStateOf(AppFilter.of(Prefs.listFilter)) }
     var sort by remember { mutableStateOf(AppSort.of(Prefs.listSort)) }
@@ -189,7 +191,10 @@ fun HomeScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        if (!a11yOn) Button(onClick = onOpenA11y) { Text("Activar") }
+                        if (!a11yOn) Button(onClick = { showA11yGuide = true }) { Text("Activar") }
+                    }
+                    if (!a11yOn) {
+                        TextButton(onClick = { showA11yGuide = true }) { Text("¿Aparece en gris? Ver instrucciones") }
                     }
                 }
             }
@@ -498,6 +503,14 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+    if (showA11yGuide) {
+        A11yGuideDialog(
+            onOpenA11y = onOpenA11y,
+            onOpenAppInfo = onOpenAppInfo,
+            onDismiss = { showA11yGuide = false }
+        )
     }
 
     if (confirmNewCode) {

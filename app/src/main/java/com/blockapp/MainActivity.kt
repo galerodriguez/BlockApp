@@ -104,6 +104,7 @@ class MainActivity : AppCompatActivity() {
                         a11yOn = a11yOn,
                         firewallOn = firewallOn,
                         onOpenA11y = ::openAccessibilitySettings,
+                        onOpenAppInfo = ::openAppInfo,
                         onFirewallToggle = ::toggleFirewall,
                         adminOn = adminOn,
                         onAdminToggle = ::toggleAdmin,
@@ -199,6 +200,14 @@ class MainActivity : AppCompatActivity() {
         keepSession = true
         Usage.openSettings(this)
         Toast.makeText(this, "Busca «BlockApp» y activa el permiso", Toast.LENGTH_LONG).show()
+    }
+
+    private fun openAppInfo() {
+        keepSession = true
+        startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$packageName"))
+        )
+        Toast.makeText(this, "Toca ⋮ arriba a la derecha › «Permitir ajustes restringidos»", Toast.LENGTH_LONG).show()
     }
 
     private fun openAccessibilitySettings() {
