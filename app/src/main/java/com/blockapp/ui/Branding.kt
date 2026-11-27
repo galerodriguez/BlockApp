@@ -72,7 +72,7 @@ fun AppearancePicker() {
             ThemeMode.values().forEach { m ->
                 FilterChip(
                     selected = ThemeSettings.mode == m,
-                    onClick = { ThemeSettings.setMode(m) },
+                    onClick = { ThemeSettings.changeMode(m) },
                     label = { Text(m.label) }
                 )
             }
@@ -92,7 +92,7 @@ fun AppearancePicker() {
                             .background(
                                 if (c == ThemeColor.WALLPAPER) MaterialTheme.colorScheme.tertiary else c.swatch
                             )
-                            .clickable { ThemeSettings.setColor(c) }
+                            .clickable { ThemeSettings.changeColor(c) }
                     )
                     Text(c.label, style = MaterialTheme.typography.labelSmall)
                 }
