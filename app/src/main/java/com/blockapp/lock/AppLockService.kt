@@ -9,7 +9,14 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import android.graphics.PixelFormat
 import android.os.PowerManager
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
+import android.widget.FrameLayout
+import android.widget.ImageView
+import com.blockapp.R
 import android.view.accessibility.AccessibilityEvent
 import androidx.core.content.ContextCompat
 import com.blockapp.data.Pause
@@ -58,6 +65,7 @@ class AppLockService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        instance = this
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_USER_PRESENT)
@@ -83,13 +91,14 @@ class AppLockService : AccessibilityService() {
             UsageTracker.onForeground(pkg)
         }
         currentPkg = pkg
-        checkAndLock(pkg)
+        if (!checkAndLock(pkg)) hideCover()
     }
 
-    private fun checkAndLock(pkg: String) {
-        if (LockActivity.visibleFor == pkg) return // ya se está mostrando
+    /** Devuelve true si la app está (o queda) tapada por la pantalla de bloqueo. */
+    private fun checkAndLock(pkg: String): Boolean {
+        if (LockActivity.visibleFor == pkg) return true // ya se está mostrando
 
-        when {
+        return when {
             UsageTracker.isOverLimit(pkg) ->
                 launchLock(pkg, LockActivity.MODE_LIMIT)
 
@@ -101,6 +110,8 @@ class AppLockService : AccessibilityService() {
 
             pkg in Prefs.lockedApps && Schedule.isActive() && !LockSession.isUnlocked(pkg) ->
                 launchLock(pkg, LockActivity.MODE_PIN)
+
+            else -> false
         }
     }
 
@@ -137,13 +148,73 @@ class AppLockService : AccessibilityService() {
         }
     }
 
-    private fun launchLock(pkg: String, mode: String) {
+    // ---------- Pantalla de tapado instantánea ----------
+    // Abrir la pantalla de PIN (una Activity) tarda unos cientos de ms y en ese tiempo
+    // se llega a ver la app. Una superposición de accesibilidad aparece al instante y
+    // tapa la app hasta que la pantalla de PIN ya está dibujada.
+
+    private var cover: View? = null
+    private val hideCoverRunnable = Runnable { hideCover() }
+
+    private fun showCover() {
+        if (cover != null) {
+            handler.removeCallbacks(hideCoverRunnable)
+            handler.postDelayed(hideCoverRunnable, 3_000)
+            return
+        }
+        try {
+            val wm = getSystemService(WindowManager::class.java)
+            val view = FrameLayout(this).apply {
+                setBackgroundColor(0xFF1E1B4B.toInt())
+                addView(
+                    ImageView(this@AppLockService).apply {
+                        setImageResource(R.drawable.ic_logo)
+                        setColorFilter(0xFFFFFFFF.toInt())
+                    },
+                    FrameLayout.LayoutParams(
+                        (72 * resources.displayMetrics.density).toInt(),
+                        (72 * resources.displayMetrics.density).toInt(),
+                        Gravity.CENTER
+                    )
+                )
+            }
+            val lp = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.OPAQUE
+            )
+            wm.addView(view, lp)
+            cover = view
+            // Seguridad: nunca dejar la pantalla tapada si algo falla
+            handler.postDelayed(hideCoverRunnable, 3_000)
+        } catch (_: Exception) {
+            cover = null
+        }
+    }
+
+    fun hideCover() {
+        handler.removeCallbacks(hideCoverRunnable)
+        val v = cover ?: return
+        cover = null
+        try {
+            getSystemService(WindowManager::class.java).removeView(v)
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun launchLock(pkg: String, mode: String): Boolean {
+        showCover()
         startActivity(
             Intent(this, LockActivity::class.java)
                 .putExtra(LockActivity.EXTRA_PKG, pkg)
                 .putExtra(LockActivity.EXTRA_MODE, mode)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
+        return true
     }
 
     private fun isActivity(pkg: String, cls: String): Boolean = try {
@@ -156,10 +227,18 @@ class AppLockService : AccessibilityService() {
     override fun onInterrupt() {}
 
     override fun onDestroy() {
+        instance = null
+        hideCover()
         handler.removeCallbacks(tick)
         UsageTracker.pause()
         try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
         try { unregisterReceiver(packageReceiver) } catch (_: Exception) {}
         super.onDestroy()
+    }
+
+    companion object {
+        /** Servicio en marcha (para que la pantalla de PIN quite la superposición). */
+        @Volatile
+        var instance: AppLockService? = null
     }
 }

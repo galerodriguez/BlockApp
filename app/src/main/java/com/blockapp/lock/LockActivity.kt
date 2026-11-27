@@ -146,6 +146,8 @@ class LockActivity : AppCompatActivity() {
         handler.postDelayed(watcher, 5_000)
         requestState = Prefs.timeRequests[targetPkg]
         visibleFor = targetPkg
+        // Ya estamos encima de la app: quitar la superposición instantánea en cuanto se dibuje
+        window.decorView.postDelayed({ AppLockService.instance?.hideCover() }, 150)
         if (!autoPrompted && Biometric.available(this)) {
             autoPrompted = true
             promptBiometric()
@@ -161,6 +163,7 @@ class LockActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        AppLockService.instance?.hideCover()
         if (visibleFor == targetPkg) visibleFor = null
         // Si el usuario se va sin desbloquear, la pantalla se descarta
         if (!isChangingConfigurations && !isFinishing) finish()
