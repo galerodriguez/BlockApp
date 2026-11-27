@@ -84,12 +84,12 @@ object ThemeSettings {
         color = ThemeColor.values().firstOrNull { it.name == Prefs.themeColor } ?: ThemeColor.BRAND
     }
 
-    fun setMode(m: ThemeMode) {
+    fun changeMode(m: ThemeMode) {
         mode = m
         Prefs.themeMode = m.name
     }
 
-    fun setColor(c: ThemeColor) {
+    fun changeColor(c: ThemeColor) {
         color = c
         Prefs.themeColor = c.name
     }
